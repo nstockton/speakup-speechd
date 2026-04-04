@@ -201,7 +201,7 @@
 		"typing_extensions",
 	]
 	# The heading to display for first-party imports.
-	import_heading_firstparty = "speakup_speechd Modules:"
+	import_heading_firstparty = "Speakup-speechd Modules:"
 	# Override known first-party imports.
 	known_first_party = ["speakup_speechd"]
 	# The heading to display for local imports.
