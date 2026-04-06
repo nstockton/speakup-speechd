@@ -29,16 +29,16 @@ from contextlib import suppress
 from enum import Enum, IntEnum, auto
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 
-if TYPE_CHECKING:
-	from .typedef import ListVoicesType, Self, SSIPClientType, T
+if TYPE_CHECKING:  # pragma: no cover
+	from .typedef import ListVoicesType, Self, SettingsCallbackType, SSIPClientType, T
 
 
 try:
 	import speechd
-except ImportError:
+except ImportError:  # pragma: no cover
 	print("ERROR: speechd Python module not found.", file=sys.stderr)
 	print("Install python3-speechd or equivalent package.", file=sys.stderr)
 	raise SystemExit(1) from None
@@ -81,6 +81,10 @@ PUNCTUATION_MODES: Final[tuple[str, ...]] = (
 	speechd.PunctuationMode.MOST,
 	speechd.PunctuationMode.ALL,
 )
+EPOLLIN: Final[int] = getattr(select, "EPOLLIN", 1)
+O_RDONLY: Final[int] = getattr(os, "O_RDONLY", 0)
+O_RDWR: Final[int] = getattr(os, "O_RDWR", 2)
+O_NONBLOCK: Final[int] = getattr(os, "O_NONBLOCK", 2048)
 
 
 # Globals:
@@ -176,7 +180,7 @@ class Softsynth:
 			logger.debug(f"Reading from '{LATIN1_SOFTSYNTH_PATH}'.")
 		if self._epoll is None:
 			self._epoll = select.epoll()
-			self._epoll.register(self.fd, select.EPOLLIN)
+			self._epoll.register(self.fd, EPOLLIN)
 
 	@staticmethod
 	def _get_fd(softsynth_path: Path) -> int:
@@ -193,12 +197,12 @@ class Softsynth:
 			OSError: If device cannot be opened.
 		"""
 		try:
-			return os.open(softsynth_path, os.O_RDWR | os.O_NONBLOCK)
+			return os.open(softsynth_path, O_RDWR | O_NONBLOCK)
 		except OSError:
 			logger.debug(f"Unable to open '{softsynth_path}' in read-write mode, trying read-only mode.")
 			try:
 				# Speakup will not receive index marks if this succeeds.
-				return os.open(softsynth_path, os.O_RDONLY | os.O_NONBLOCK)
+				return os.open(softsynth_path, O_RDONLY | O_NONBLOCK)
 			except OSError:
 				logger.debug(f"Unable to open '{softsynth_path}' in read-only mode.")
 				raise
@@ -248,6 +252,157 @@ class Softsynth:
 			os.write(self.fd, data)
 
 
+class Settings:
+	"""Settings for the speech bridge."""
+
+	def __init__(self, callback: SettingsCallbackType, *, config_path: Path | None = None) -> None:
+		"""
+		Initialize settings.
+
+		Args:
+			callback: Callback to fire when values change.
+			config_path: Path to a settings configuration file.
+		"""
+		self._callback: SettingsCallbackType = callback
+		self._config_path: Path | None = config_path
+		self._data_mode: str = speechd.DataMode.SSML
+		self._rate: int = 2
+		self._pitch: int = 5
+		self._volume: int = 5
+		self._punctuation: int = 1
+		self._pause: bool = False
+		self._language: str | None = None
+		self._voice: str | None = None
+
+	@property
+	def data_mode(self) -> str:
+		"""Current data mode used for speech (SSML or TEXT)."""
+		return self._data_mode
+
+	@data_mode.setter
+	def data_mode(self, value: str) -> None:
+		self._data_mode = value
+		logger.debug(f"Data mode: {value}.")
+		self._callback("set_data_mode", value)
+
+	@property
+	def pause(self) -> bool:
+		"""Whether speech is currently paused."""
+		return self._pause
+
+	@pause.setter
+	def pause(self, value: bool) -> None:
+		self._pause = value
+		func: str = "pause" if value else "resume"
+		logger.debug(f"{func}.")
+		self._callback(func)
+
+	@property
+	def pitch(self) -> int:
+		"""Current pitch setting (Speakup scale)."""
+		return self._pitch
+
+	@pitch.setter
+	def pitch(self, value: int) -> None:
+		self._pitch = value
+		value = (value - 5) * (20 if value < 5 else 25)  # NOQA: PLR2004
+		value = clamp(value, -100, 100)
+		logger.debug(f"Pitch: {value}.")
+		self._callback("set_pitch", value)
+
+	@property
+	def punctuation(self) -> int:
+		"""Current punctuation level."""
+		return self._punctuation
+
+	@punctuation.setter
+	def punctuation(self, value: int) -> None:
+		self._punctuation = value
+		punctuation_mode = PUNCTUATION_MODES[clamp(value, 0, len(PUNCTUATION_MODES) - 1)]
+		logger.debug(f"Punctuation: {punctuation_mode}.")
+		self._callback("set_punctuation", punctuation_mode)
+
+	@property
+	def rate(self) -> int:
+		"""Current speech rate setting (Speakup scale)."""
+		return self._rate
+
+	@rate.setter
+	def rate(self, value: int) -> None:
+		self._rate = value
+		value = int(value * 22.3) - 100
+		value = clamp(value, -100, 100)
+		logger.debug(f"Rate: {value}.")
+		self._callback("set_rate", value)
+
+	@property
+	def volume(self) -> int:
+		"""Current volume setting (Speakup scale)."""
+		return self._volume
+
+	@volume.setter
+	def volume(self, value: int) -> None:
+		self._volume = value
+		value = (value - 5) * (20 if value < 5 else 25)  # NOQA: PLR2004
+		value = clamp(value, -100, 100)
+		logger.debug(f"Volume: {value}.")
+		self._callback("set_volume", value)
+
+	@property
+	def language(self) -> str | None:
+		"""Current language setting (Speech Dispatcher)."""
+		return self._language
+
+	@language.setter
+	def language(self, value: str | None) -> None:
+		self._language = value
+		logger.debug(f"Language: {value}.")
+		if value:
+			self._callback("set_language", value)
+
+	@property
+	def voice(self) -> str | None:
+		"""Current synthesis voice name (Speech Dispatcher)."""
+		return self._voice
+
+	@voice.setter
+	def voice(self, value: str | None) -> None:
+		self._voice = value
+		logger.debug(f"Voice: {value}.")
+		if value:
+			self._callback("set_synthesis_voice", value)
+
+	def init_speech(self) -> None:
+		"""Apply stored speech settings to the Speech Dispatcher connection."""
+		self.data_mode = self._data_mode
+		self.rate = self._rate
+		self.pitch = self._pitch
+		self.volume = self._volume
+		self.punctuation = self._punctuation
+		self.pause = self._pause
+		self.language = self._language
+		self.voice = self._voice
+
+	def load_config(self) -> None:
+		"""Load language and voice from configuration file."""
+		if self._config_path is None:
+			logger.warning("Unable to load configuration file; configuration undefined.")
+			return
+		if not self._config_path.exists():
+			logger.warning(f"Configuration file '{self._config_path}' does not exist.")
+			return
+		config = configparser.ConfigParser()
+		config.read(self._config_path)
+		if "speech-dispatcher" in config:
+			section = config["speech-dispatcher"]
+			if "language" in section:
+				self.language = section.get("language")
+			if "voice" in section:
+				self.voice = section.get("voice")
+		else:
+			logger.debug(f"No [speech-dispatcher] section found in config file: {self._config_path}")
+
+
 class ParseState(Enum):
 	"""Possible states of the Speakup softsynth protocol parser."""
 
@@ -265,23 +420,21 @@ class Sign(IntEnum):
 	PLUS = 1
 
 
-class SpeakupParser:  # NOQA: PLR0904
+class SpeakupParser:
 	"""Stateful parser and bridge between Speakup softsynth protocol and Speech Dispatcher."""
 
-	def __init__(self) -> None:
-		"""Initialize parser with default speech settings and state."""
-		self.softsynth: Softsynth = Softsynth()
+	def __init__(self, *, config_path: Path | None = None) -> None:
+		"""
+		Initialize parser with default state.
+
+		Args:
+			config_path: Path to a settings configuration file.
+		"""
 		self.connection: SSIPClientType | None = None
+		self.softsynth: Softsynth = Softsynth()
+		self.settings: Settings = Settings(self.settings_callback, config_path=config_path)
 		self._utf8_decoder: IncrementalDecoder = getincrementaldecoder(UTF8)(errors="replace")
 		self._is_speaking: bool = False
-		self._data_mode: str = speechd.DataMode.SSML
-		self._rate: int = 2
-		self._pitch: int = 5
-		self._volume: int = 5
-		self._punctuation: int = 1
-		self._pause: bool = False
-		self._language: str | None = None
-		self._voice: str | None = None
 		self._state: ParseState = ParseState.TEXT
 		self._pending_text: bytearray = bytearray()
 		self._ssml_parts: list[str] = []
@@ -321,7 +474,7 @@ class SpeakupParser:  # NOQA: PLR0904
 		"""Open softsynth device, connect to Speech Dispatcher, and apply speech settings."""
 		self.open_softsynth()
 		self.connect_speech_dispatcher()
-		self._init_speech_settings()
+		self.settings.init_speech()
 
 	def open_softsynth(self) -> None:
 		"""Open the Speakup softsynth device."""
@@ -344,17 +497,6 @@ class SpeakupParser:  # NOQA: PLR0904
 				break
 			time.sleep(1)
 
-	def _init_speech_settings(self) -> None:
-		"""Apply stored speech settings to the Speech Dispatcher connection."""
-		self.data_mode = self._data_mode
-		self.rate = self._rate
-		self.pitch = self._pitch
-		self.volume = self._volume
-		self.punctuation = self._punctuation
-		self.pause = self._pause
-		self.language = self._language
-		self.voice = self._voice
-
 	def close(self) -> None:
 		"""Close Speech Dispatcher connection and softsynth device, reset state."""
 		self._reset_state()
@@ -373,7 +515,7 @@ class SpeakupParser:  # NOQA: PLR0904
 		self._param = 0
 		self._state = ParseState.TEXT
 
-	def event_callback(self, event_type: str, *, index_mark: str | None = None) -> None:
+	def sd_callback(self, event_type: str, *, index_mark: str | None = None) -> None:
 		"""
 		Handle callbacks from Speech Dispatcher.
 
@@ -389,6 +531,20 @@ class SpeakupParser:  # NOQA: PLR0904
 		elif event_type == speechd.CallbackType.END:
 			self._is_speaking = False
 			logger.debug("Speech end.")
+
+	def settings_callback(self, func_name: str, *args: Any, **kwargs: Any) -> None:
+		"""
+		Handle value changed callbacks from Settings.
+
+		Args:
+			func_name: Name of matching method belonging to active SSIPClient.
+			*args: Positional arguments to pass to method.
+			**kwargs: Keyword-only arguments to pass to method.
+		"""
+		if self.connection is not None:
+			func = getattr(self.connection, func_name, None)
+			if callable(func):
+				func(*args, **kwargs)
 
 	def list_voices(self, language: str | None = None, variant: str | None = None) -> ListVoicesType:
 		"""
@@ -407,133 +563,6 @@ class SpeakupParser:  # NOQA: PLR0904
 	def is_speaking(self) -> bool:
 		"""True if currently speaking, False otherwise."""
 		return self._is_speaking
-
-	@property
-	def data_mode(self) -> str:
-		"""Current data mode used for speech (SSML or TEXT)."""
-		return self._data_mode
-
-	@data_mode.setter
-	def data_mode(self, value: str) -> None:
-		self._data_mode = value
-		logger.debug(f"Data mode: {value}.")
-		if self.connection is not None:
-			self.connection.set_data_mode(value)
-
-	@property
-	def pause(self) -> bool:
-		"""Whether speech is currently paused."""
-		return self._pause
-
-	@pause.setter
-	def pause(self, value: bool) -> None:
-		self._pause = value
-		logger.debug(f"{'Pause' if value else 'Resume'}.")
-		if self.connection is not None:
-			if value:
-				self.connection.pause()
-			else:
-				self.connection.resume()
-
-	@property
-	def pitch(self) -> int:
-		"""Current pitch setting (Speakup scale)."""
-		return self._pitch
-
-	@pitch.setter
-	def pitch(self, value: int) -> None:
-		self._pitch = value
-		value = (value - 5) * (20 if value < 5 else 25)  # NOQA: PLR2004
-		value = clamp(value, -100, 100)
-		logger.debug(f"Pitch: {value}.")
-		if self.connection is not None:
-			self.connection.set_pitch(value)
-
-	@property
-	def punctuation(self) -> int:
-		"""Current punctuation level."""
-		return self._punctuation
-
-	@punctuation.setter
-	def punctuation(self, value: int) -> None:
-		self._punctuation = value
-		punctuation_mode = PUNCTUATION_MODES[clamp(value, 0, len(PUNCTUATION_MODES) - 1)]
-		logger.debug(f"Punctuation: {punctuation_mode}.")
-		if self.connection is not None:
-			self.connection.set_punctuation(punctuation_mode)
-
-	@property
-	def rate(self) -> int:
-		"""Current speech rate setting (Speakup scale)."""
-		return self._rate
-
-	@rate.setter
-	def rate(self, value: int) -> None:
-		self._rate = value
-		value = int(value * 22.3) - 100
-		value = clamp(value, -100, 100)
-		logger.debug(f"Rate: {value}.")
-		if self.connection is not None:
-			self.connection.set_rate(value)
-
-	@property
-	def volume(self) -> int:
-		"""Current volume setting (Speakup scale)."""
-		return self._volume
-
-	@volume.setter
-	def volume(self, value: int) -> None:
-		self._volume = value
-		value = (value - 5) * (20 if value < 5 else 25)  # NOQA: PLR2004
-		value = clamp(value, -100, 100)
-		logger.debug(f"Volume: {value}.")
-		if self.connection is not None:
-			self.connection.set_volume(value)
-
-	@property
-	def language(self) -> str | None:
-		"""Current language setting (Speech Dispatcher)."""
-		return self._language
-
-	@language.setter
-	def language(self, value: str | None) -> None:
-		self._language = value
-		logger.debug(f"Language: {value}.")
-		if self.connection is not None and value:
-			self.connection.set_language(value)
-
-	@property
-	def voice(self) -> str | None:
-		"""Current synthesis voice name (Speech Dispatcher)."""
-		return self._voice
-
-	@voice.setter
-	def voice(self, value: str | None) -> None:
-		self._voice = value
-		logger.debug(f"Voice: {value}.")
-		if self.connection is not None and value:
-			self.connection.set_synthesis_voice(value)
-
-	def load_config(self, config_path: Path) -> None:
-		"""
-		Load language and voice from INI configuration file.
-
-		Args:
-			config_path: Path to the INI file.
-		"""
-		if not config_path.exists():
-			logger.warning(f"Configuration file '{config_path}' does not exist.")
-			return
-		config = configparser.ConfigParser()
-		config.read(config_path)
-		if "speech-dispatcher" in config:
-			section = config["speech-dispatcher"]
-			if "language" in section:
-				self.language = section.get("language")
-			if "voice" in section:
-				self.voice = section.get("voice")
-		else:
-			logger.debug(f"No [speech-dispatcher] section found in config file: {config_path}")
 
 	def feed(self, data: bytes) -> None:
 		"""
@@ -571,8 +600,6 @@ class SpeakupParser:  # NOQA: PLR0904
 		else:  # Latin-1.
 			text = str(self._pending_text, self.softsynth.encoding, errors="replace")
 		self._pending_text.clear()
-		if not text:
-			return
 		if len(text) == 1 and not text.isspace() and text.isprintable():
 			if self.connection is not None and not self._ssml_parts:
 				try:
@@ -586,7 +613,7 @@ class SpeakupParser:  # NOQA: PLR0904
 			# We end up here if the call to char failed
 			# or if the single character was preceded by an index mark.
 			self._ssml_parts.append(f'<say-as interpret-as="characters">{html.escape(text)}</say-as>')
-		else:
+		elif text:
 			self._ssml_parts.append(html.escape(text))
 
 	def _flush_ssml(self) -> None:
@@ -599,14 +626,14 @@ class SpeakupParser:  # NOQA: PLR0904
 		try:
 			self.connection.speak(
 				raw_ssml,
-				callback=self.event_callback,
+				callback=self.sd_callback,
 				event_types=(
 					speechd.CallbackType.INDEX_MARK,
 					speechd.CallbackType.BEGIN,
 					speechd.CallbackType.END,
 				),
 			)
-		except Exception:
+		except Exception:  # pragma: no cover
 			logger.exception("Speak SSML failed.")
 
 	def _handle_text_state(self, byte: bytes) -> None:
@@ -703,15 +730,15 @@ class SpeakupParser:  # NOQA: PLR0904
 			self.close()
 			self.connect()
 		elif command == b"b":  # Punctuation.
-			self.punctuation = param
+			self.settings.punctuation = param
 		elif command == b"P":  # Pause.
-			self.pause = not self.pause
+			self.settings.pause = not self.settings.pause
 		elif command == b"p":  # Pitch.
-			self.pitch = param if sign is Sign.ZERO else self.pitch + sign * param
+			self.settings.pitch = param if sign is Sign.ZERO else self.settings.pitch + sign * param
 		elif command == b"s":  # Rate.
-			self.rate = param if sign is Sign.ZERO else self.rate + sign * param
+			self.settings.rate = param if sign is Sign.ZERO else self.settings.rate + sign * param
 		elif command == b"v":  # Volume.
-			self.volume = param if sign is Sign.ZERO else self.volume + sign * param
+			self.settings.volume = param if sign is Sign.ZERO else self.settings.volume + sign * param
 
 	def run(self) -> None:
 		"""Main event loop that reads from softsynth and feeds data to parser."""
@@ -737,7 +764,7 @@ class SpeakupParser:  # NOQA: PLR0904
 		logger.info("Speech bridge terminated.")
 
 
-def run() -> None:
+def run() -> None:  # pragma: no cover
 	"""Parse arguments and start the Speakup to Speech Dispatcher bridge."""
 	parser = argparse.ArgumentParser(description="Speakup Speech Dispatcher bridge")
 	parser.add_argument("-c", "--config", metavar="FILE", type=Path, help="path to configuration INI file")
@@ -769,15 +796,13 @@ def run() -> None:
 	# set ignore for background jobs, so Python skips auto-install at startup.
 	# Fixes KeyboardInterrupt not being thrown when running in background.
 	signal.signal(signal.SIGINT, signal.default_int_handler)
-	with SpeakupParser() as speakup_parser:
+	with SpeakupParser(config_path=args.config) as speakup_parser:
 		if args.list_voices is not False:
 			speakup_parser.connect_speech_dispatcher()
 			voices = speakup_parser.list_voices(language=args.list_voices)
 			print("Available synthesis voices:")
 			print("\n".join(name for name, _, _ in voices))
 			return
-		if args.config:
-			speakup_parser.load_config(args.config)
 		speakup_parser.run()
 
 

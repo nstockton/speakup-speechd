@@ -89,6 +89,15 @@ repos:
         stages: [commit]
   - repo: local
     hooks:
+      - id: unittest
+        name: UnitTest
+        entry: "python -B -m coverage run -m unittest"
+        args: ["--failfast"]
+        language: system
+        pass_filenames: false  # Do not pass file names as positional arguments.
+        require_serial: true  # Execute using a single process.
+        stages: [pre-commit, pre-merge-commit]
+        types: [python]
       - id: isort
         name: ISort
         entry: "python -B -m isort"

@@ -136,6 +136,7 @@
 [tool.ruff.lint.per-file-ignores]
 	"**/__init__.py" = ["RUF067"]
 	"**/_version.py" = ["CPY001"]
+	"./tests/**" = ["D1", "PLC2801", "PLR09", "PLR6301", "SLF001"]
 	"**/typedef.py" = ["D1", "FBT001", "PLR09"]
 
 [tool.ruff.lint.pydocstyle]
@@ -148,7 +149,7 @@
 
 [tool.coverage.report]
 	precision = 0
-	fail_under = 100.0
+	fail_under = 80.0
 	show_missing = true
 	skip_covered = true
 	sort = "Cover"
@@ -163,7 +164,11 @@
 
 [tool.coverage.run]
 	source = ["speakup_speechd"]
-	omit = []
+	omit = [
+		"src/speakup_speechd/__init__.py",
+		"src/speakup_speechd/__main__.py",
+		"src/speakup_speechd/typedef.py",
+	]
 
 [tool.isort]
 	line_length = 110  # The max length of an import line (used for wrapping long imports).

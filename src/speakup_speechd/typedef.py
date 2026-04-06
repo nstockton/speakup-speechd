@@ -14,7 +14,7 @@ from __future__ import annotations
 # Built-in Modules:
 import sys
 from collections.abc import Iterable
-from typing import Protocol, TypeAlias, TypeVar
+from typing import Any, Protocol, TypeAlias, TypeVar
 
 
 if sys.version_info >= (3, 11):
@@ -31,7 +31,11 @@ ListVoicesType: TypeAlias = tuple[tuple[str, str | None, str | None], ...]
 T = TypeVar("T")
 
 
-class EventCallbackType(Protocol):
+class SettingsCallbackType(Protocol):
+	def __call__(self, func_name: str, *args: Any, **kwargs: Any) -> None: ...
+
+
+class SDCallbackType(Protocol):
 	def __call__(self, event_type: str, *, index_mark: str | None = None) -> None: ...
 
 
@@ -49,12 +53,10 @@ class SSIPClientType(Protocol):
 		socket_path: str | None = None,
 	) -> None: ...
 
-	def set_data_mode(self, value: str) -> None: ...
-
 	def speak(
 		self,
 		text: str,
-		callback: EventCallbackType | None = None,
+		callback: SDCallbackType | None = None,
 		event_types: Iterable[str] | None = None,
 	) -> None: ...
 
@@ -62,33 +64,18 @@ class SSIPClientType(Protocol):
 
 	def cancel(self, scope: str = "self") -> None: ...
 
-	def pause(self, scope: str = "self") -> None: ...
-
-	def resume(self, scope: str = "self") -> None: ...
-
 	def list_synthesis_voices(
 		self, language: str | None = None, variant: str | None = None
 	) -> ListVoicesType: ...
-
-	def set_language(self, language: str | None, scope: str = "self") -> None: ...
-
-	def set_pitch(self, value: int, scope: str = "self") -> None: ...
-
-	def set_rate(self, value: int, scope: str = "self") -> None: ...
-
-	def set_volume(self, value: int, scope: str = "self") -> None: ...
-
-	def set_punctuation(self, value: str, scope: str = "self") -> None: ...
-
-	def set_synthesis_voice(self, value: str, scope: str = "self") -> None: ...
 
 	def close(self) -> None: ...
 
 
 __all__: list[str] = [
-	"EventCallbackType",
 	"ListVoicesType",
+	"SDCallbackType",
 	"SSIPClientType",
 	"Self",
+	"SettingsCallbackType",
 	"T",
 ]
