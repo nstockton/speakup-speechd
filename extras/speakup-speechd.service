@@ -1,0 +1,36 @@
+[Unit]
+Description=Speakup to Speech Dispatcher Bridge
+After=systemd-modules-load.service
+After=multi-user.target
+Wants=multi-user.target
+
+[Service]
+# The bridge runs in a while-True loop (simple type).
+Type=simple
+
+# Must run as root to open /dev/softsynth or /dev/softsynthu.
+User=root
+
+ExecStart=/usr/local/bin/speakup-speechd -c /usr/local/etc/speakup-speechd.ini
+
+# Restart automatically if the bridge crashes.
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=5s
+
+# Force unbuffered output so logs appear immediately in journalctl.
+Environment=PYTHONUNBUFFERED=1
+
+# Give the bridge higher priority.
+Nice=-10
+
+# Logging goes automatically to systemd journal.
+StandardOutput=journal
+StandardError=journal
+
+# The bridge only needs access to the softsynth device.
+ReadWritePaths=/dev/softsynth /dev/softsynthu
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target
