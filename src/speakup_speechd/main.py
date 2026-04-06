@@ -16,7 +16,6 @@ from __future__ import annotations
 # Built-in Modules:
 import argparse
 import configparser
-import html
 import logging
 import os
 import select
@@ -85,10 +84,32 @@ EPOLLIN: Final[int] = getattr(select, "EPOLLIN", 1)
 O_RDONLY: Final[int] = getattr(os, "O_RDONLY", 0)
 O_RDWR: Final[int] = getattr(os, "O_RDWR", 2)
 O_NONBLOCK: Final[int] = getattr(os, "O_NONBLOCK", 2048)
+ESCAPE_SSML_STR_ENTITIES: Final[tuple[tuple[str, str], ...]] = (
+	("&", "&amp;"),  # & must always be first when escaping.
+	("<", "&lt;"),
+	(">", "&gt;"),
+	("'", "&apos;"),
+	('"', "&quot;"),
+)
 
 
 # Globals:
 logger: Final[logging.Logger] = logging.getLogger(__name__)
+
+
+def ssml_escape_text(text: str) -> str:
+	"""
+	Escapes characters special to SSML.
+
+	Args:
+		text: The text to be escaped.
+
+	Returns:
+		The escaped text.
+	"""
+	for old, new in ESCAPE_SSML_STR_ENTITIES:
+		text = text.replace(old, new)
+	return text
 
 
 def find_any(sequence: Sequence[T], values: Iterable[T]) -> int:
@@ -637,9 +658,9 @@ class SpeakupParser:
 					return  # Success, don't fall through.
 			# We end up here if the call to char failed
 			# or if the single character was preceded by an index mark.
-			self._ssml_parts.append(f'<say-as interpret-as="characters">{html.escape(text)}</say-as>')
+			self._ssml_parts.append(f'<say-as interpret-as="characters">{ssml_escape_text(text)}</say-as>')
 		elif text:
-			self._ssml_parts.append(html.escape(text))
+			self._ssml_parts.append(ssml_escape_text(text))
 
 	def _flush_ssml(self) -> None:
 		"""Send any accumulated SSML to Speech Dispatcher."""

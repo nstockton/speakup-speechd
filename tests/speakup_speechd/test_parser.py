@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 # Built-in Modules:
-import html
 import logging
 import tempfile
 import unittest
@@ -31,6 +30,7 @@ from speakup_speechd.main import (
 	ParseState,
 	Sign,
 	SpeakupParser,
+	ssml_escape_text,
 )
 
 
@@ -443,14 +443,14 @@ class TestSpeakupParser(unittest.TestCase):
 		mock_settings_cls: MagicMock,
 		mock_softsynth_cls: MagicMock,
 	) -> None:
-		"""Test multi-character text is HTML-escaped and added to SSML parts."""
+		"""Test multi-character text is SSML-escaped and added to SSML parts."""
 		mock_soft = mock_softsynth_cls.return_value
 		mock_soft.encoding = UTF8
 		parser = SpeakupParser()
 		with patch.object(parser, "_flush_ssml") as mock_flush_ssml:
 			parser.feed(b"'Hi!'")
-			# HTML escaped but simple text.
-			self.assertIn(html.escape("'Hi!'"), parser._ssml_parts[0])
+			# SSML escaped but simple text.
+			self.assertIn(ssml_escape_text("'Hi!'"), parser._ssml_parts[0])
 			mock_flush_ssml.assert_called_once_with()
 
 	@patch("speakup_speechd.main.Softsynth")
