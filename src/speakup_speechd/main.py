@@ -272,6 +272,7 @@ class Settings:
 		self._punctuation: int = 1
 		self._pause: bool = False
 		self._language: str | None = None
+		self._module: str | None = None
 		self._voice: str | None = None
 
 	@property
@@ -361,6 +362,18 @@ class Settings:
 			self._callback("set_language", value)
 
 	@property
+	def module(self) -> str | None:
+		"""Current output module name (Speech Dispatcher)."""
+		return self._module
+
+	@module.setter
+	def module(self, value: str | None) -> None:
+		self._module = value
+		logger.debug(f"Module: {value}.")
+		if value:
+			self._callback("set_output_module", value)
+
+	@property
 	def voice(self) -> str | None:
 		"""Current synthesis voice name (Speech Dispatcher)."""
 		return self._voice
@@ -381,10 +394,11 @@ class Settings:
 		self.punctuation = self._punctuation
 		self.pause = self._pause
 		self.language = self._language
+		self.module = self._module
 		self.voice = self._voice
 
 	def load_config(self) -> None:
-		"""Load language and voice from configuration file."""
+		"""Load values from configuration file."""
 		if self._config_path is None:
 			logger.warning("Unable to load configuration file; configuration undefined.")
 			return
@@ -397,6 +411,8 @@ class Settings:
 			section = config["speech-dispatcher"]
 			if "language" in section:
 				self.language = section.get("language")
+			if "module" in section:
+				self.module = section.get("module")
 			if "voice" in section:
 				self.voice = section.get("voice")
 		else:
@@ -545,6 +561,15 @@ class SpeakupParser:
 			func = getattr(self.connection, func_name, None)
 			if callable(func):
 				func(*args, **kwargs)
+
+	def list_modules(self) -> tuple[str, ...]:
+		"""
+		Current list of available output modules from Speech Dispatcher.
+
+		Returns:
+			All output modules as a tuple of strings.
+		"""
+		return self.connection.list_output_modules() if self.connection is not None else ()
 
 	def list_voices(self, language: str | None = None, variant: str | None = None) -> ListVoicesType:
 		"""
@@ -769,6 +794,9 @@ def run() -> None:  # pragma: no cover
 	parser = argparse.ArgumentParser(description="Speakup Speech Dispatcher bridge")
 	parser.add_argument("-c", "--config", metavar="FILE", type=Path, help="path to configuration INI file")
 	parser.add_argument(
+		"-lm", "--list-modules", action="store_true", help="list available output modules and exit"
+	)
+	parser.add_argument(
 		"-lv",
 		"--list-voices",
 		nargs="?",
@@ -797,13 +825,18 @@ def run() -> None:  # pragma: no cover
 	# Fixes KeyboardInterrupt not being thrown when running in background.
 	signal.signal(signal.SIGINT, signal.default_int_handler)
 	with SpeakupParser(config_path=args.config) as speakup_parser:
-		if args.list_voices is not False:
+		if args.list_modules:
+			speakup_parser.connect_speech_dispatcher()
+			modules = speakup_parser.list_modules()
+			print("Available output modules:")
+			print("\n".join(modules))
+		elif args.list_voices is not False:
 			speakup_parser.connect_speech_dispatcher()
 			voices = speakup_parser.list_voices(language=args.list_voices)
 			print("Available synthesis voices:")
 			print("\n".join(name for name, _, _ in voices))
-			return
-		speakup_parser.run()
+		else:
+			speakup_parser.run()
 
 
 if __name__ == "__main__":
