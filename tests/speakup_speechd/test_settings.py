@@ -51,6 +51,54 @@ class TestSettings(unittest.TestCase):
 		self.assertIsNone(settings.voice)
 
 	@patch("speakup_speechd.main.logger")
+	def test_language_setter(self, mock_logger: MagicMock) -> None:
+		"""Test language setter logs always but only calls callback for truthy values."""
+		callback_mock: MagicMock = MagicMock()
+		settings: Settings = Settings(callback_mock)
+		settings.language = None
+		self.assertIsNone(settings.language)
+		callback_mock.assert_not_called()
+		mock_logger.debug.assert_called_once_with("Language: None.")
+		callback_mock.reset_mock()
+		mock_logger.reset_mock()
+		settings.language = "en"
+		self.assertEqual(settings.language, "en")
+		callback_mock.assert_called_once_with("set_language", "en")
+		mock_logger.debug.assert_called_once_with("Language: en.")
+
+	@patch("speakup_speechd.main.logger")
+	def test_module_setter(self, mock_logger: MagicMock) -> None:
+		"""Test module setter logs always but only calls callback for truthy values."""
+		callback_mock: MagicMock = MagicMock()
+		settings: Settings = Settings(callback_mock)
+		settings.module = None
+		self.assertIsNone(settings.module)
+		callback_mock.assert_not_called()
+		mock_logger.debug.assert_called_once_with("Module: None.")
+		callback_mock.reset_mock()
+		mock_logger.reset_mock()
+		settings.module = "espeak-ng"
+		self.assertEqual(settings.module, "espeak-ng")
+		callback_mock.assert_called_once_with("set_output_module", "espeak-ng")
+		mock_logger.debug.assert_called_once_with("Module: espeak-ng.")
+
+	@patch("speakup_speechd.main.logger")
+	def test_voice_setter(self, mock_logger: MagicMock) -> None:
+		"""Test voice setter logs always but only calls callback for truthy values."""
+		callback_mock: MagicMock = MagicMock()
+		settings: Settings = Settings(callback_mock)
+		settings.voice = None
+		self.assertIsNone(settings.voice)
+		callback_mock.assert_not_called()
+		mock_logger.debug.assert_called_once_with("Voice: None.")
+		callback_mock.reset_mock()
+		mock_logger.reset_mock()
+		settings.voice = "english"
+		self.assertEqual(settings.voice, "english")
+		callback_mock.assert_called_once_with("set_synthesis_voice", "english")
+		mock_logger.debug.assert_called_once_with("Voice: english.")
+
+	@patch("speakup_speechd.main.logger")
 	def test_data_mode_setter(self, mock_logger: MagicMock) -> None:
 		"""Test data_mode property setter."""
 		callback_mock: MagicMock = MagicMock()
@@ -139,66 +187,36 @@ class TestSettings(unittest.TestCase):
 		mock_logger.debug.assert_called_once_with("Volume: 100.")
 
 	@patch("speakup_speechd.main.logger")
-	def test_language_setter(self, mock_logger: MagicMock) -> None:
-		"""Test language setter logs always but only calls callback for truthy values."""
-		callback_mock: MagicMock = MagicMock()
-		settings: Settings = Settings(callback_mock)
-		settings.language = None
-		self.assertIsNone(settings.language)
-		callback_mock.assert_not_called()
-		mock_logger.debug.assert_called_once_with("Language: None.")
-		callback_mock.reset_mock()
-		mock_logger.reset_mock()
-		settings.language = "en"
-		self.assertEqual(settings.language, "en")
-		callback_mock.assert_called_once_with("set_language", "en")
-		mock_logger.debug.assert_called_once_with("Language: en.")
-
-	@patch("speakup_speechd.main.logger")
-	def test_voice_setter(self, mock_logger: MagicMock) -> None:
-		"""Test voice setter logs always but only calls callback for truthy values."""
-		callback_mock: MagicMock = MagicMock()
-		settings: Settings = Settings(callback_mock)
-		settings.voice = None
-		self.assertIsNone(settings.voice)
-		callback_mock.assert_not_called()
-		mock_logger.debug.assert_called_once_with("Voice: None.")
-		callback_mock.reset_mock()
-		mock_logger.reset_mock()
-		settings.voice = "english"
-		self.assertEqual(settings.voice, "english")
-		callback_mock.assert_called_once_with("set_synthesis_voice", "english")
-		mock_logger.debug.assert_called_once_with("Voice: english.")
-
-	@patch("speakup_speechd.main.logger")
 	def test_init_speech(self, mock_logger: MagicMock) -> None:
 		"""Test init_speech reapplies all stored settings (triggers setters/callbacks)."""
 		callback_mock: MagicMock = MagicMock()
 		settings: Settings = Settings(callback_mock)
 		# Manually set internal state, bypassing setters.
+		settings._language = "de"
+		settings._module = "espeak-ng"
+		settings._voice = "german"
 		settings._data_mode = "TEXT"
 		settings._rate = 3
 		settings._pitch = 6
 		settings._volume = 4
 		settings._punctuation = 2
 		settings._pause = True
-		settings._language = "de"
-		settings._voice = "german"
 		callback_mock.reset_mock()
 		mock_logger.reset_mock()
 		settings.init_speech()
-		# 8 calls expected; language + voice are truthy.
-		self.assertEqual(callback_mock.call_count, 8)
+		# 9 calls expected; language/module/voice are truthy.
+		self.assertEqual(callback_mock.call_count, 9)
 		callback_mock.assert_has_calls(
 			[
+				unittest.mock.call("set_language", "de"),
+				unittest.mock.call("set_output_module", "espeak-ng"),
+				unittest.mock.call("set_synthesis_voice", "german"),
 				unittest.mock.call("set_data_mode", "TEXT"),
 				unittest.mock.call("set_rate", unittest.mock.ANY),
 				unittest.mock.call("set_pitch", unittest.mock.ANY),
 				unittest.mock.call("set_volume", unittest.mock.ANY),
 				unittest.mock.call("set_punctuation", unittest.mock.ANY),
 				unittest.mock.call("pause"),
-				unittest.mock.call("set_language", "de"),
-				unittest.mock.call("set_synthesis_voice", "german"),
 			],
 			any_order=False,
 		)
@@ -232,23 +250,16 @@ class TestSettings(unittest.TestCase):
 		mock_exists.return_value = True
 		mock_parser = mock_config_parser.return_value
 		mock_parser.__contains__.return_value = True
-		section: dict[str, str] = {"language": "fr", "voice": "french"}
+		section: dict[str, str] = {"language": "fr", "module": "espeak-ng", "voice": "french"}
 		mock_parser.__getitem__.return_value = section
 		config_path: Path = Path("/valid/config.ini")
 		callback_mock: MagicMock = MagicMock()
 		settings: Settings = Settings(callback_mock, config_path=config_path)
 		settings.load_config()
 		mock_parser.read.assert_called_once_with(config_path)
-		self.assertEqual(settings.language, "fr")
-		self.assertEqual(settings.voice, "french")
-		# Setters were triggered.
-		callback_mock.assert_has_calls(
-			[
-				unittest.mock.call("set_language", "fr"),
-				unittest.mock.call("set_synthesis_voice", "french"),
-			],
-			any_order=True,
-		)
+		self.assertEqual(settings._language, "fr")
+		self.assertEqual(settings._module, "espeak-ng")
+		self.assertEqual(settings._voice, "french")
 
 	@patch("speakup_speechd.main.configparser.ConfigParser")
 	@patch("speakup_speechd.main.Path.exists")

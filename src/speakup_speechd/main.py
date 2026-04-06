@@ -408,15 +408,15 @@ class Settings:
 
 	def init_speech(self) -> None:
 		"""Apply stored speech settings to the Speech Dispatcher connection."""
+		self.language = self._language
+		self.module = self._module
+		self.voice = self._voice
 		self.data_mode = self._data_mode
 		self.rate = self._rate
 		self.pitch = self._pitch
 		self.volume = self._volume
 		self.punctuation = self._punctuation
 		self.pause = self._pause
-		self.language = self._language
-		self.module = self._module
-		self.voice = self._voice
 
 	def load_config(self) -> None:
 		"""Load values from configuration file."""
@@ -431,11 +431,11 @@ class Settings:
 		if "speech-dispatcher" in config:
 			section = config["speech-dispatcher"]
 			if "language" in section:
-				self.language = section.get("language")
+				self._language = section.get("language")
 			if "module" in section:
-				self.module = section.get("module")
+				self._module = section.get("module")
 			if "voice" in section:
-				self.voice = section.get("voice")
+				self._voice = section.get("voice")
 		else:
 			logger.debug(f"No [speech-dispatcher] section found in config file: {self._config_path}")
 
@@ -511,6 +511,7 @@ class SpeakupParser:
 		"""Open softsynth device, connect to Speech Dispatcher, and apply speech settings."""
 		self.open_softsynth()
 		self.connect_speech_dispatcher()
+		self.settings.load_config()
 		self.settings.init_speech()
 
 	def open_softsynth(self) -> None:
