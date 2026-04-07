@@ -169,6 +169,7 @@ class Softsynth:
 		"""Initialize Softsynth with no open device."""
 		self.fd: int | None = None  # The file descriptor of the softsynth device.
 		self.encoding: str = UTF8  # The character encoding expected by the softsynth device.
+		self.is_read_only: bool = False
 		self._epoll: select.epoll | None = None
 
 	def __del__(self) -> None:
@@ -192,11 +193,11 @@ class Softsynth:
 		if self.fd is not None:
 			return  # Device already open.
 		try:
-			self.fd = self._get_fd(UTF8_SOFTSYNTH_PATH)
+			self.fd, self.is_read_only = self._get_fd(UTF8_SOFTSYNTH_PATH)
 			self.encoding = UTF8
 			logger.debug(f"Reading from '{UTF8_SOFTSYNTH_PATH}'.")
 		except OSError:
-			self.fd = self._get_fd(LATIN1_SOFTSYNTH_PATH)
+			self.fd, self.is_read_only = self._get_fd(LATIN1_SOFTSYNTH_PATH)
 			self.encoding = LATIN1
 			logger.debug(f"Reading from '{LATIN1_SOFTSYNTH_PATH}'.")
 		if self._epoll is None:
@@ -204,7 +205,7 @@ class Softsynth:
 			self._epoll.register(self.fd, EPOLLIN)
 
 	@staticmethod
-	def _get_fd(softsynth_path: Path) -> int:
+	def _get_fd(softsynth_path: Path) -> tuple[int, bool]:
 		"""
 		Open softsynth device, trying read-write mode then read-only.
 
@@ -212,18 +213,18 @@ class Softsynth:
 			softsynth_path: Path to device file.
 
 		Returns:
-			File descriptor.
+			File descriptor and boolean (True if opened read-only, False otherwise).
 
 		Raises:
 			OSError: If device cannot be opened.
 		"""
 		try:
-			return os.open(softsynth_path, O_RDWR | O_NONBLOCK)
+			return os.open(softsynth_path, O_RDWR | O_NONBLOCK), False
 		except OSError:
 			logger.debug(f"Unable to open '{softsynth_path}' in read-write mode, trying read-only mode.")
 			try:
 				# Speakup will not receive index marks if this succeeds.
-				return os.open(softsynth_path, O_RDONLY | O_NONBLOCK)
+				return os.open(softsynth_path, O_RDONLY | O_NONBLOCK), True
 			except OSError:
 				logger.debug(f"Unable to open '{softsynth_path}' in read-only mode.")
 				raise
@@ -264,7 +265,7 @@ class Softsynth:
 		Args:
 			data: Index mark (should be numeric).
 		"""
-		if self.fd is None:
+		if self.fd is None or self.is_read_only:
 			return
 		if not data.isdigit():
 			logger.warning(f"Speech Dispatcher tried to send non-numeric index mark ({data!r}) to Speakup.")
@@ -524,6 +525,10 @@ class SpeakupParser:
 			if self.softsynth.fd is not None:
 				break
 			time.sleep(1)
+		logger.info(
+			f"Speakup softsynth loaded {'read-only ' if self.softsynth.is_read_only else ''}"
+			+ f"with {self.softsynth.encoding.upper()} encoding."
+		)
 
 	def connect_speech_dispatcher(self) -> None:
 		"""Connect to Speech Dispatcher."""
@@ -534,6 +539,11 @@ class SpeakupParser:
 				logger.debug("Connected to Speech Dispatcher.")
 				break
 			time.sleep(1)
+		language = self.connection.get_language() or "unknown"
+		module = self.connection.get_output_module() or "unknown"
+		logger.info(
+			f"Speech Dispatcher connection established with language {language!r} and module {module!r}."
+		)
 
 	def close(self) -> None:
 		"""Close Speech Dispatcher connection and softsynth device, reset state."""

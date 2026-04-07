@@ -49,6 +49,7 @@ class TestSoftsynth(unittest.TestCase):
 		synth = Softsynth()
 		self.assertIsNone(synth.fd)
 		self.assertEqual(synth.encoding, UTF8)
+		self.assertFalse(synth.is_read_only)
 		self.assertIsNone(synth._epoll)
 
 	@patch.object(Softsynth, "close")
@@ -100,13 +101,14 @@ class TestSoftsynth(unittest.TestCase):
 	@patch.object(Softsynth, "_get_fd")
 	def test_open_utf8_success(self, mock_get_fd: Mock, mock_select: Mock, mock_logger: Mock) -> None:
 		"""Test open prefers UTF-8 path and registers epoll."""
-		mock_get_fd.return_value = 5
+		mock_get_fd.return_value = (5, False)
 		mock_epoll = MagicMock()
 		mock_select.epoll.return_value = mock_epoll
 		synth = Softsynth()
 		synth.open()
 		mock_get_fd.assert_called_once_with(UTF8_SOFTSYNTH_PATH)
 		self.assertEqual(synth.fd, 5)
+		self.assertFalse(synth.is_read_only)
 		self.assertEqual(synth.encoding, UTF8)
 		mock_logger.debug.assert_called_with(f"Reading from '{UTF8_SOFTSYNTH_PATH}'.")
 		mock_select.epoll.assert_called_once()
@@ -118,13 +120,14 @@ class TestSoftsynth(unittest.TestCase):
 	@patch.object(Softsynth, "_get_fd")
 	def test_open_fallback_latin1(self, mock_get_fd: Mock, mock_select: Mock, mock_logger: Mock) -> None:
 		"""Test open falls back to Latin-1 on UTF-8 failure."""
-		mock_get_fd.side_effect = [OSError, 5]
+		mock_get_fd.side_effect = [OSError, (5, True)]
 		mock_epoll = MagicMock()
 		mock_select.epoll.return_value = mock_epoll
 		synth = Softsynth()
 		synth.open()
 		self.assertEqual(mock_get_fd.call_args_list, [call(UTF8_SOFTSYNTH_PATH), call(LATIN1_SOFTSYNTH_PATH)])
 		self.assertEqual(synth.fd, 5)
+		self.assertTrue(synth.is_read_only)
 		self.assertEqual(synth.encoding, LATIN1)
 		mock_logger.debug.assert_any_call(f"Reading from '{LATIN1_SOFTSYNTH_PATH}'.")
 		synth.fd = None
@@ -133,8 +136,9 @@ class TestSoftsynth(unittest.TestCase):
 	def test_get_fd_rw_success(self, mock_os: Mock) -> None:
 		"""Test _get_fd succeeds with read-write mode."""
 		mock_os.open.return_value = 10
-		fd = Softsynth._get_fd(UTF8_SOFTSYNTH_PATH)
+		fd, is_read_only = Softsynth._get_fd(UTF8_SOFTSYNTH_PATH)
 		self.assertEqual(fd, 10)
+		self.assertFalse(is_read_only)
 		mock_os.open.assert_called_once_with(UTF8_SOFTSYNTH_PATH, O_RDWR | O_NONBLOCK)
 
 	@patch("speakup_speechd.main.logger")
@@ -142,8 +146,9 @@ class TestSoftsynth(unittest.TestCase):
 	def test_get_fd_rw_fail_ro_success(self, mock_os: Mock, mock_logger: Mock) -> None:
 		"""Test _get_fd falls back to read-only on RDWR failure."""
 		mock_os.open.side_effect = [OSError, 10]
-		fd = Softsynth._get_fd(UTF8_SOFTSYNTH_PATH)
+		fd, is_read_only = Softsynth._get_fd(UTF8_SOFTSYNTH_PATH)
 		self.assertEqual(fd, 10)
+		self.assertTrue(is_read_only)
 		self.assertEqual(mock_os.open.call_count, 2)
 		mock_logger.debug.assert_called_with(
 			f"Unable to open '{UTF8_SOFTSYNTH_PATH}' in read-write mode, trying read-only mode."
