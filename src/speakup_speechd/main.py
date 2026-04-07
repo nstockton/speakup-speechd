@@ -511,9 +511,19 @@ class SpeakupParser:
 	def connect(self) -> None:
 		"""Open softsynth device, connect to Speech Dispatcher, and apply speech settings."""
 		self.open_softsynth()
+		logger.info(
+			f"Speakup softsynth loaded {'read-only ' if self.softsynth.is_read_only else ''}"
+			+ f"with {self.softsynth.encoding.upper()} encoding."
+		)
 		self.connect_speech_dispatcher()
 		self.settings.load_config()
 		self.settings.init_speech()
+		if self.connection is not None:
+			logger.info(
+				"Speech Dispatcher connection established with "
+				+ f"language {self.connection.get_language() or 'unknown'!r} and "
+				+ f"module {self.connection.get_output_module() or 'unknown'!r}."
+			)
 
 	def open_softsynth(self) -> None:
 		"""Open the Speakup softsynth device."""
@@ -525,10 +535,6 @@ class SpeakupParser:
 			if self.softsynth.fd is not None:
 				break
 			time.sleep(1)
-		logger.info(
-			f"Speakup softsynth loaded {'read-only ' if self.softsynth.is_read_only else ''}"
-			+ f"with {self.softsynth.encoding.upper()} encoding."
-		)
 
 	def connect_speech_dispatcher(self) -> None:
 		"""Connect to Speech Dispatcher."""
@@ -539,11 +545,6 @@ class SpeakupParser:
 				logger.debug("Connected to Speech Dispatcher.")
 				break
 			time.sleep(1)
-		language = self.connection.get_language() or "unknown"
-		module = self.connection.get_output_module() or "unknown"
-		logger.info(
-			f"Speech Dispatcher connection established with language {language!r} and module {module!r}."
-		)
 
 	def close(self) -> None:
 		"""Close Speech Dispatcher connection and softsynth device, reset state."""
