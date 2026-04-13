@@ -208,6 +208,15 @@ class TestSoftsynth(unittest.TestCase):
 		synth.write(b"test data")
 		mock_os.write.assert_not_called()
 
+	@patch("speakup_speechd.main.os")
+	def test_write_when_read_only(self, mock_os: Mock) -> None:
+		"""Test write does nothing when softsynth open in read-only mode."""
+		synth = Softsynth()
+		synth.fd = 10
+		synth.is_read_only = True
+		synth.write(b"test data")
+		mock_os.write.assert_not_called()
+
 	@patch("speakup_speechd.main.logger")
 	@patch("speakup_speechd.main.os")
 	def test_write_non_numeric(self, mock_os: Mock, mock_logger: Mock) -> None:

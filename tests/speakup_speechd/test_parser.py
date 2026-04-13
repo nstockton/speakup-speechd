@@ -194,7 +194,9 @@ class TestSpeakupParser(unittest.TestCase):
 	) -> None:
 		"""Test the full connect method orchestrates softsynth, speechd, and settings init."""
 		parser = SpeakupParser()
+		parser.connection = MagicMock()
 		with (
+			patch("speakup_speechd.main.logger") as mock_logger,
 			patch.object(parser, "open_softsynth") as mock_open_softsynth,
 			patch.object(parser, "connect_speech_dispatcher") as mock_connect_sd,
 			patch.object(parser.settings, "init_speech") as mock_init_speech,
@@ -203,6 +205,7 @@ class TestSpeakupParser(unittest.TestCase):
 			mock_open_softsynth.assert_called_once_with()
 			mock_connect_sd.assert_called_once_with()
 			mock_init_speech.assert_called_once_with()
+			self.assertEqual(mock_logger.info.call_count, 2)
 
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
@@ -295,16 +298,40 @@ class TestSpeakupParser(unittest.TestCase):
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
 	@patch("speakup_speechd.main.speechd")
+	def test_list_modules(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test list_modules delegates to connection.list_output_modules."""
+		parser = SpeakupParser()
+		parser.connection = MagicMock()
+		parser.connection.list_output_modules.return_value = ("espeak-ng", "viavoice")
+		result = parser.list_modules()
+		parser.connection.list_output_modules.assert_called_once_with()
+		self.assertEqual(result, ("espeak-ng", "viavoice"))
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
+	def test_list_modules_no_connection(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test list_modules returns empty tuple when no connection exists."""
+		parser = SpeakupParser()
+		self.assertEqual(parser.list_modules(), ())
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
 	def test_list_voices(
 		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
 	) -> None:
 		"""Test list_voices delegates to connection.list_synthesis_voices."""
 		parser = SpeakupParser()
 		parser.connection = MagicMock()
-		parser.connection.list_synthesis_voices.return_value = [("voice1", "en", "variant1")]
+		parser.connection.list_synthesis_voices.return_value = (("voice1", "en", "variant1"),)
 		result = parser.list_voices(language="en", variant="variant1")
 		parser.connection.list_synthesis_voices.assert_called_once_with("en", "variant1")
-		self.assertEqual(result, [("voice1", "en", "variant1")])
+		self.assertEqual(result, (("voice1", "en", "variant1"),))
 
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
@@ -357,6 +384,28 @@ class TestSpeakupParser(unittest.TestCase):
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
 	@patch("speakup_speechd.main.speechd")
+	def test_feed_text_in_non_fast_path(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test text accumulation in _handle_text_state when fast path is not taken."""
+		parser = SpeakupParser()
+		parser.connection = MagicMock()
+		mock_soft = mock_softsynth_cls.return_value
+		mock_soft.encoding = UTF8
+		# Presence of control char forces byte-by-byte processing.
+		segments: tuple[bytes, ...] = (b"hello", DTLK_CMD + b"1p", b"world")
+		parser.feed(b"".join(segments))
+		# Both text segments are flushed to SSML in the slow path. We verify via the speak calls
+		# because _flush_ssml clears _ssml_parts after each call to speak.
+		text_segments: tuple[str, ...] = (str(segments[0], "ascii"), str(segments[-1], "ascii"))
+		self.assertEqual(parser.connection.speak.call_count, len(text_segments))
+		ssml_calls = [call[0][0] for call in parser.connection.speak.call_args_list]
+		for text_segment, ssml_call in zip(text_segments, ssml_calls, strict=True):
+			self.assertEqual(f"<speak>{text_segment}</speak>", ssml_call)
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
 	def test_feed_stop_command_resets(
 		self,
 		mock_speechd: MagicMock,
@@ -370,6 +419,61 @@ class TestSpeakupParser(unittest.TestCase):
 			parser.feed(DTLK_STOP)
 			parser.connection.cancel.assert_called_once_with()
 			mock_reset.assert_called_once_with()
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
+	def test_feed_commands_with_absolute_parameters(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test _handle_cmd_start_state for absolute commands."""
+		parser = SpeakupParser()
+		parser.connection = MagicMock()
+		# Punctuation.
+		parser.feed(DTLK_CMD + b"3b")
+		self.assertEqual(parser.settings.punctuation, 3)
+		# Pause.
+		parser.settings.pause = True
+		parser.feed(DTLK_CMD + b"P")
+		self.assertFalse(parser.settings.pause)
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
+	def test_feed_command_with_relative_parameters(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test _handle_cmd_start_state for + and - signs."""
+		parser = SpeakupParser()
+		parser.connection = MagicMock()
+		parser.settings.pitch = 5
+		parser.settings.rate = 5
+		parser.settings.volume = 5
+		# Relative increment pitch.
+		parser.feed(DTLK_CMD + b"+3p")
+		self.assertEqual(parser.settings.pitch, 8)
+		# Relative decrement rate.
+		parser.feed(DTLK_CMD + b"-2s")
+		self.assertEqual(parser.settings.rate, 3)
+		# Relative volume without digit does not change value.
+		parser.feed(DTLK_CMD + b"+v")
+		self.assertEqual(parser.settings.volume, 5)
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
+	def test_feed_bare_commands(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test bare commands (no sign, no digits) in _handle_cmd_start_state."""
+		parser = SpeakupParser()
+		parser.connection = MagicMock()
+		parser.settings.punctuation = 1
+		parser.feed(DTLK_CMD + b"b")  # Bare punctuation command.
+		self.assertEqual(parser.settings.punctuation, 0)  # Param defaults to 0.
+		parser.settings.pause = False
+		parser.feed(DTLK_CMD + b"P")  # Bare pause command.
+		self.assertTrue(parser.settings.pause)
 
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
@@ -534,6 +638,21 @@ class TestSpeakupParser(unittest.TestCase):
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
 	@patch("speakup_speechd.main.speechd")
+	def test_run_empty_data_read(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test EOF reached in run."""
+		parser = SpeakupParser()
+		mock_soft = mock_softsynth_cls.return_value
+		mock_soft.poll_for_read.return_value = True
+		mock_soft.read.return_value = b""  # simulate device closed / EOF
+		with patch.object(parser, "connect"), patch("speakup_speechd.main.logger") as mock_logger:
+			parser.run()
+			mock_logger.info.assert_called_with("Speech bridge terminated.")
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
 	def test_run_handles_interrupted_error(
 		self,
 		mock_speechd: MagicMock,
@@ -566,6 +685,23 @@ class TestSpeakupParser(unittest.TestCase):
 		with patch.object(parser, "connect"), patch("speakup_speechd.main.logger") as mock_logger:
 			parser.run()
 			mock_logger.exception.assert_called_once_with("Select/read error.")
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
+	def test_run_handles_exception(
+		self,
+		mock_speechd: MagicMock,
+		mock_settings_cls: MagicMock,
+		mock_softsynth_cls: MagicMock,
+	) -> None:
+		"""Test run logs Exception from poll_for_read and exits cleanly."""
+		parser = SpeakupParser()
+		mock_soft = mock_softsynth_cls.return_value
+		mock_soft.poll_for_read.side_effect = Exception
+		with patch.object(parser, "connect"), patch("speakup_speechd.main.logger") as mock_logger:
+			parser.run()
+			mock_logger.exception.assert_called_once_with("Unexpected error in run loop.")
 
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
