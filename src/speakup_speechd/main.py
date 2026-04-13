@@ -328,7 +328,9 @@ class Settings:
 	@pitch.setter
 	def pitch(self, value: int) -> None:
 		self._pitch = value
-		value = (value - 5) * (20 if value < 5 else 25)  # NOQA: PLR2004
+		default: int = 5
+		modifier: int = 20 if value < default else 25
+		value = (value - default) * modifier
 		value = clamp(value, -100, 100)
 		logger.debug(f"Pitch: {value}.")
 		self._callback("set_pitch", value)
@@ -366,7 +368,9 @@ class Settings:
 	@volume.setter
 	def volume(self, value: int) -> None:
 		self._volume = value
-		value = (value - 5) * (20 if value < 5 else 25)  # NOQA: PLR2004
+		default: int = 5
+		modifier: int = 20 if value < default else 25
+		value = (value - default) * modifier
 		value = clamp(value, -100, 100)
 		logger.debug(f"Volume: {value}.")
 		self._callback("set_volume", value)
