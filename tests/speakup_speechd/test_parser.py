@@ -771,6 +771,24 @@ class TestSpeakupParser(unittest.TestCase):
 	@patch("speakup_speechd.main.Softsynth")
 	@patch("speakup_speechd.main.Settings")
 	@patch("speakup_speechd.main.speechd")
+	def test_flush_ssml_when_error_on_speak(
+		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
+	) -> None:
+		"""Test _flush_ssml is a no-op when connection.speak raises an exception."""
+		parser = SpeakupParser()
+		parser.connection = MagicMock()
+		parser.connection.speak.side_effect = Exception
+		parser._ssml_parts = ["hello", " world"]
+		with patch("speakup_speechd.main.logger") as mock_logger:
+			parser._flush_ssml()
+			parser.connection.speak.assert_called_once()
+			self.assertIn("<speak>hello world</speak>", parser.connection.speak.call_args[0][0])
+			mock_logger.exception.assert_called_once_with("Speak SSML failed.")
+			self.assertEqual(parser._ssml_parts, [])
+
+	@patch("speakup_speechd.main.Softsynth")
+	@patch("speakup_speechd.main.Settings")
+	@patch("speakup_speechd.main.speechd")
 	def test_flush_ssml_no_connection_or_no_parts(
 		self, mock_speechd: MagicMock, mock_settings_cls: MagicMock, mock_softsynth_cls: MagicMock
 	) -> None:

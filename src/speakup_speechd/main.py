@@ -695,7 +695,7 @@ class SpeakupParser:
 					speechd.CallbackType.END,
 				),
 			)
-		except Exception:  # pragma: no cover
+		except Exception:
 			logger.exception("Speak SSML failed.")
 
 	def _handle_text_state(self, byte: bytes) -> None:
